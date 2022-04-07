@@ -14,6 +14,12 @@
 		return {
 			add: c => commands.push(c),
 			execute: (std) => commands.forEach(c => c.execute(std)),
+			toString: () => "sequence {\n" + commands
+				.map(c => c.toString())
+				.map(s => s.split("\n"))
+				.map(a => a.map(s => "  " + s))
+				.map(a => a.join("\n"))
+				.join(",\n") + "\n}",
 		}
 	}
 
@@ -26,6 +32,12 @@
 				let evaluatedArgs = args.map(a => a.evaluate());
 				executeCommand(evaluatedArgs, std);
 			},
+			toString: () => "command {\n" + args
+				.map(a => a.toString())
+				.map(s => s.split("\n"))
+				.map(a => a.map(s => "  " + s))
+				.map(a => a.join("\n"))
+				.join(",\n") + "\n}",
 		};
 	}
 
@@ -35,21 +47,41 @@
 			setValue: v => { value = v; },
 			execute: (std) => {
 				variables[name] = value.evaluate();
-			}
+			},
+			toString: () => `assign '${name}'=\n${value.toString().split('\n').map(l => "  " + l).join("\n")}`,
 		};
 	}
 
 	function astValueCompound() {
 		let components = [];
-		return {
+		const self = {
 			add: c => components.push(c),
 			evaluate: () => components.map(c => c.evaluate()).join(""),
+			toString: () => "compound {\n" + components
+				.map(a => a.toString())
+				.map(s => s.split("\n"))
+				.map(a => a.map(s => "  " + s))
+				.map(a => a.join("\n"))
+				.join(",\n") + "\n}",
+			reduce: () => {
+				if (components.length == 1) {
+					if (components[0].reduce) {
+						return components[0].reduce();
+					} else {
+						return components[0];
+					}
+				} else {
+					return self;
+				}
+			},
 		};
+		return self;
 	}
 
 	function astValueString(str) {
 		return {
 			evaluate: () => str,
+			toString: () => "'" + str + "'",
 		};
 	}
 
@@ -57,6 +89,7 @@
 		return {
 			// add support for multiple arguments in one variable
 			evaluate: () => variables[name],
+			toString: () => `var '${name}'`,
 		}
 	}
 
@@ -65,6 +98,7 @@
 			evaluate: () => {
 				// TODO
 			},
+			toString: () => "not implemented",
 		};
 	}
 
@@ -73,6 +107,7 @@
 			evaluate: () => {
 				// TODO
 			},
+			toString: () => "not implemented",
 		};
 	}
 
@@ -82,6 +117,127 @@
 
 	function syntaxError(line, message) {
 		throw `${file}: line ${line}: syntax error: ${message}`;
+	}
+
+	function findSymbolInScope(content, line, symbol, startPosition, length) {
+		let scopeStack = [];
+
+		for (let i = startPosition; i < length; i++) {
+			const c = content[i];
+
+			if (c == '\n') {
+				line++;
+			}
+			if (scopeStack.length == 0) {
+				if (c == symbol) {
+					return i;
+				} else if (c == '"') {
+					scopeStack.push('"');
+				} else if (c == '$' && i < length - 1 && content[i + 1] == '(') {
+					i++;
+					scopeStack.push(')');
+				} else if (c == '`') {
+					scopeStack.push('`');
+				} else if (c == "'") {
+					scopeStack.push("'");
+				} else {
+					// continue
+				}
+			} else {
+				const top = scopeStack[scopeStack.length - 1];
+				if (c == top) {
+					scopeStack.pop();
+				} else if (top == '"' && c == '$' && i < length - 1 && content[i + 1] == '(') {
+					i++;
+					scopeStack.push(')');
+				} else if (top == '"' && c == '`') {
+					scopeStack.push('`');
+				} else if (top == ')' || top == '`') {
+					if (c == '"') {
+						scopeStack.push('"');
+					} else if (c == "'") {
+						scopeStack.push("'");
+					} else {
+						// continue
+					}
+				} else {
+					// continue
+				}
+			}
+		}
+
+		syntaxError(line, "unexpected end of file");
+	}
+
+	function doubleQuoteToAst(quoteContent, line) {
+		const length = quoteContent.length;
+
+		let astRoot = astValueCompound();
+
+		let buffer = "";
+
+		const QS_INIT         = 0;
+		const QS_VARIABLE     = 1;
+		const QS_SUBSTITUTION = 2;
+		let state = QS_INIT;
+
+		for (let i = 0; i < length; i++) {
+			const c = quoteContent[i];
+			if (c == '\n') {
+				line++;
+			}
+			switch(state) {
+				case QS_INIT:
+						if (c == '$') {
+							astRoot.add(astValueString(buffer));
+							buffer = "";
+							if (i < length - 1 && quoteContent[i + 1] == '(') {
+								state = QS_SUBSTITUTION;
+								i += 1;
+							} else {
+								state = QS_VARIABLE;
+							}
+						} else {
+							buffer += c;
+						}
+					break;
+				case QS_VARIABLE:
+					if (!("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".includes(c))) {
+						astRoot.add(astValueVar(buffer));
+						buffer = "";
+						state = QS_INIT;
+						i--;
+					} else {
+						buffer += c;
+					}
+					break;
+				case QS_SUBSTITUTION:
+					throw "not implemented";
+					break;
+				default:
+					panic(line, "unknown parse state");
+					break;
+			}
+		}
+
+		if (buffer) {
+			switch(state) {
+				case QS_INIT:
+					astRoot.add(astValueString(buffer));
+					break;
+				case QS_VARIABLE:
+					astRoot.add(astValueVar(buffer));
+					break;
+				case QS_SUBSTITUTION:
+					throw "not implemented";
+					break;
+				default:
+					panic(line, "unknown parse state");
+					break;
+			}
+		}
+
+		return astRoot;
 	}
 
 	function parseCommands(content) {
@@ -94,6 +250,7 @@
 
 		let astRoot = astSequence();
 		let current = null;
+		let value = null;
 
 		let state = PS_INIT;
 		let buffer = "";
@@ -121,7 +278,18 @@
 				case PS_COMMAND:
 					// check for escape and quotes
 					if (c == ';' || c == '\n') {
-						if (buffer) {
+						if (value) {
+							if (buffer) {
+								if (buffer[0] == '$') {
+									value.add(astValueVar(buffer.substring(1)));
+								} else {
+									value.add(astValueString(buffer));
+								}
+								buffer = "";
+							}
+							current.add(value.reduce());
+							value = null;
+						} else if (buffer) {
 							if (buffer[0] == '$') {
 								current.add(astValueVar(buffer.substring(1)));
 							} else {
@@ -133,7 +301,18 @@
 						current = null;
 						state = PS_INIT;
 					} else if (c == ' ' || c == '\t') {
-						if (buffer) {
+						if (value) {
+							if (buffer) {
+								if (buffer[0] == '$') {
+									value.add(astValueVar(buffer.substring(1)));
+								} else {
+									value.add(astValueString(buffer));
+								}
+								buffer = "";
+							}
+							current.add(value.reduce());
+							value = null;
+						} else if (buffer) {
 							if (buffer[0] == '$') {
 								current.add(astValueVar(buffer.substring(1)));
 							} else {
@@ -141,6 +320,25 @@
 							}
 							buffer = "";
 						}
+					} else if (c == '"') {
+						if (!value) {
+							value = astValueCompound();
+						}
+						if (buffer) {
+							value.add(astValueString(buffer));
+							buffer = "";
+						}
+
+						const end = findSymbolInScope(content, line, '"', i + 1, length);
+						const ast = doubleQuoteToAst(content.substring(i + 1, end), line);
+
+						value.add(ast);
+
+						i = end;
+					} else if (c == "'") {
+						const end = findSymbolInScope(content, line, "'", i + 1, length);
+						buffer += content.substring(i + 1, end);
+						i = end;
 					} else if (c == '=' && current.size() == 0) {
 						current = astAssignment(buffer);
 						state = PS_ASSIGN;
@@ -152,15 +350,48 @@
 				case PS_ASSIGN:
 					// check for escape and quotes
 					if (c == ';' || c == '\n') {
-						if (buffer[0] == "$") {
-							current.setValue(astValueVar(buffer.substring(1)));
+						if (value) {
+							if (buffer) {
+								if (buffer[0] == "$") {
+									value.add(astValueVar(buffer.substring(1)));
+								} else {
+									value.add(astValueString(buffer));
+								}
+							}
+							current.setValue(value.reduce());
+							value = null;
+						} else if (buffer) {
+							if (buffer[0] == "$") {
+								current.setValue(astValueVar(buffer.substring(1)));
+							} else {
+								current.setValue(astValueString(buffer));
+							}
 						} else {
-							current.setValue(astValueString(buffer));
+							current.setValue(astValueString(""));
 						}
 						buffer = "";
 						astRoot.add(current);
 						current = null;
 						state = PS_INIT;
+					} else if (c == '"') {
+						if (!value) {
+							value = astValueCompound();
+						}
+						if (buffer) {
+							value.add(astValueString(buffer));
+							buffer = "";
+						}
+
+						const end = findSymbolInScope(content, line, '"', i + 1, length);
+						const ast = doubleQuoteToAst(content.substring(i + 1, end), line);
+
+						value.add(ast);
+
+						i = end;
+					} else if (c == "'") {
+						const end = findSymbolInScope(content, line, "'", i + 1, length);
+						buffer += content.substring(i + 1, end);
+						i = end;
 					} else if (c == ' ' || c == '\t') {
 						// would normale set exported variable for command but we don't support that anyway
 						// current.setValue(astValueString(buffer));
