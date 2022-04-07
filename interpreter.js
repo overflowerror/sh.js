@@ -237,7 +237,7 @@
 			}
 		}
 
-		return astRoot;
+		return [astRoot, line];
 	}
 
 	function parseCommands(content) {
@@ -330,7 +330,8 @@
 						}
 
 						const end = findSymbolInScope(content, line, '"', i + 1, length);
-						const ast = doubleQuoteToAst(content.substring(i + 1, end), line);
+						const [ast, _line] = doubleQuoteToAst(content.substring(i + 1, end), line);
+						line = _line;
 
 						value.add(ast);
 
@@ -383,7 +384,8 @@
 						}
 
 						const end = findSymbolInScope(content, line, '"', i + 1, length);
-						const ast = doubleQuoteToAst(content.substring(i + 1, end), line);
+						const [ast, _line] = doubleQuoteToAst(content.substring(i + 1, end), line);
+						line = _line;
 
 						value.add(ast);
 
