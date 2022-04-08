@@ -283,7 +283,7 @@
 								if (buffer[0] == '$') {
 									value.add(astValueVar(buffer.substring(1)));
 								} else {
-									value.add(astValueString(buffer));
+									value.add(astValueString(buffer.replaceAll('\\$', '$')));
 								}
 								buffer = "";
 							}
@@ -293,7 +293,7 @@
 							if (buffer[0] == '$') {
 								current.add(astValueVar(buffer.substring(1)));
 							} else {
-								current.add(astValueString(buffer));
+								current.add(astValueString(buffer.replaceAll('\\$', '$')));
 							}
 							buffer = "";
 						}
@@ -306,7 +306,7 @@
 								if (buffer[0] == '$') {
 									value.add(astValueVar(buffer.substring(1)));
 								} else {
-									value.add(astValueString(buffer));
+									value.add(astValueString(buffer.replaceAll('\\$', '$')));
 								}
 								buffer = "";
 							}
@@ -316,7 +316,7 @@
 							if (buffer[0] == '$') {
 								current.add(astValueVar(buffer.substring(1)));
 							} else {
-								current.add(astValueString(buffer));
+								current.add(astValueString(buffer.replaceAll('\\$', '$')));
 							}
 							buffer = "";
 						}
@@ -339,6 +339,10 @@
 					} else if (c == "'") {
 						const end = findSymbolInScope(content, line, "'", i + 1, length);
 						buffer += content.substring(i + 1, end);
+						if (buffer && buffer[0] == '$') {
+							// mask dollar sign in buffer so the variable is not expanded
+							buffer = '\\' + buffer;
+						}
 						i = end;
 					} else if (c == '=' && current.size() == 0) {
 						current = astAssignment(buffer);
