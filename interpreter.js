@@ -2,18 +2,73 @@
 (function(){
 	var variables = [];
 	var functions = [];
-	var file = "[anonymous]";
+	var currentFile = "[anonymous]";
 
-	function executeCommand(args, std) {
-		console.log(`args: ${args}, std: ${std}`);
+	const buildins = {
+		echo: function(args, ctx) {
+			const length = args.length;
+			for (let i = 1; i < length; i++) {
+				ctx.stdout.write(args[i]);
+				if (i < length - 1) {
+					ctx.stdout.write(" ");
+				}
+			}
+			ctx.stdout.write("\n");
+			ctx.stdout.flush();
+			return 0;
+		},
+	};
+
+	function executeCommand(args, ctx) {
+		if (!ctx) {
+			ctx = defaultCtx;
+		}
+
+		let errorCode = 255;
+
+		if (buildins[args[0]]) {
+			errorCode = buildins[args[0]](args, ctx);
+		} else {
+			console.debug(`command not found; args: ${args}, ctx: ${ctx}`);
+		}
+
+		console.debug("exit status: " + errorCode);
 	}
+
+	const file = {
+		console: function() {
+			let buffer = [];
+			const self = {
+				read: () => "",
+				close: () => self.flush(),
+				flush: () => {
+					console.log(buffer);
+					buffer = [];
+				},
+				write: (str) => {
+					buffer += str;
+				},
+			};
+			return self;
+		}
+	};
+
+	function makeCtx(stdin, stdout, stderr) {
+		return {
+			stdin: stdin,
+			stdout: stdout,
+			stderr: stderr,
+		}
+	}
+
+	const defaultCtx = makeCtx(file.console(), file.console(), file.console());
 
 	const ast = {
 		sequence: function() {
 			let commands = [];
 			return {
 				add: c => commands.push(c),
-				execute: (std) => commands.forEach(c => c.execute(std)),
+				execute: (ctx) => commands.forEach(c => c.execute(ctx)),
 				toString: () => "sequence {\n" + commands
 					.map(c => c.toString())
 					.map(s => s.split("\n"))
@@ -28,9 +83,9 @@
 			return {
 				add: a => args.push(a),
 				size: a => args.length,
-				execute: (std) => {
+				execute: (ctx) => {
 					let evaluatedArgs = args.map(a => a.evaluate());
-					executeCommand(evaluatedArgs, std);
+					executeCommand(evaluatedArgs, ctx);
 				},
 				toString: () => "command {\n" + args
 					.map(a => a.toString())
@@ -45,7 +100,7 @@
 			let value = ast.value.string("");
 			return {
 				setValue: v => { value = v; },
-				execute: (std) => {
+				execute: (ctx) => {
 					variables[name] = value.evaluate();
 				},
 				toString: () => `assign '${name}'=\n${value.toString().split('\n').map(l => "  " + l).join("\n")}`,
@@ -115,11 +170,11 @@
 	}
 
 	function panic(line, message) {
-		throw `${file}: line ${line}: panic: ${message}`;
+		throw `${currentFile}: line ${line}: panic: ${message}`;
 	}
 
 	function syntaxError(line, message) {
-		throw `${file}: line ${line}: syntax error: ${message}`;
+		throw `${currentFile}: line ${line}: syntax error: ${message}`;
 	}
 
 	function findSymbolInScope(content, line, symbol, startPosition, length) {
