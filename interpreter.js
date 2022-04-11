@@ -4,111 +4,114 @@
 	var functions = [];
 	var file = "[anonymous]";
 
-
 	function executeCommand(args, std) {
 		console.log(`args: ${args}, std: ${std}`);
 	}
 
-	function astSequence() {
-		let commands = [];
-		return {
-			add: c => commands.push(c),
-			execute: (std) => commands.forEach(c => c.execute(std)),
-			toString: () => "sequence {\n" + commands
-				.map(c => c.toString())
-				.map(s => s.split("\n"))
-				.map(a => a.map(s => "  " + s))
-				.map(a => a.join("\n"))
-				.join(",\n") + "\n}",
-		}
-	}
+	const ast = {
+		sequence: function() {
+			let commands = [];
+			return {
+				add: c => commands.push(c),
+				execute: (std) => commands.forEach(c => c.execute(std)),
+				toString: () => "sequence {\n" + commands
+					.map(c => c.toString())
+					.map(s => s.split("\n"))
+					.map(a => a.map(s => "  " + s))
+					.map(a => a.join("\n"))
+					.join(",\n") + "\n}",
+			}
+		},
 
-	function astCommand() {
-		let args = [];
-		return {
-			add: a => args.push(a),
-			size: a => args.length,
-			execute: (std) => {
-				let evaluatedArgs = args.map(a => a.evaluate());
-				executeCommand(evaluatedArgs, std);
+		command: function() {
+			let args = [];
+			return {
+				add: a => args.push(a),
+				size: a => args.length,
+				execute: (std) => {
+					let evaluatedArgs = args.map(a => a.evaluate());
+					executeCommand(evaluatedArgs, std);
+				},
+				toString: () => "command {\n" + args
+					.map(a => a.toString())
+					.map(s => s.split("\n"))
+					.map(a => a.map(s => "  " + s))
+					.map(a => a.join("\n"))
+					.join(",\n") + "\n}",
+			};
+		},
+
+		assignment: function(name) {
+			let value = ast.value.string("");
+			return {
+				setValue: v => { value = v; },
+				execute: (std) => {
+					variables[name] = value.evaluate();
+				},
+				toString: () => `assign '${name}'=\n${value.toString().split('\n').map(l => "  " + l).join("\n")}`,
+			};
+		},
+
+		value: {
+			compound: function() {
+				let components = [];
+				const self = {
+					add: c => components.push(c),
+					evaluate: () => components.map(c => c.evaluate()).join(""),
+					toString: () => "compound {\n" + components
+						.map(a => a.toString())
+						.map(s => s.split("\n"))
+						.map(a => a.map(s => "  " + s))
+						.map(a => a.join("\n"))
+						.join(",\n") + "\n}",
+					reduce: () => {
+						if (components.length == 1) {
+							if (components[0].reduce) {
+								return components[0].reduce();
+							} else {
+								return components[0];
+							}
+						} else {
+							return self;
+						}
+					},
+				};
+				return self;
 			},
-			toString: () => "command {\n" + args
-				.map(a => a.toString())
-				.map(s => s.split("\n"))
-				.map(a => a.map(s => "  " + s))
-				.map(a => a.join("\n"))
-				.join(",\n") + "\n}",
-		};
-	}
 
-	function astAssignment(name) {
-		let value = astValueString("");
-		return {
-			setValue: v => { value = v; },
-			execute: (std) => {
-				variables[name] = value.evaluate();
+			string: function(str) {
+				return {
+					evaluate: () => str,
+					toString: () => "'" + str + "'",
+				};
 			},
-			toString: () => `assign '${name}'=\n${value.toString().split('\n').map(l => "  " + l).join("\n")}`,
-		};
-	}
 
-	function astValueCompound() {
-		let components = [];
-		const self = {
-			add: c => components.push(c),
-			evaluate: () => components.map(c => c.evaluate()).join(""),
-			toString: () => "compound {\n" + components
-				.map(a => a.toString())
-				.map(s => s.split("\n"))
-				.map(a => a.map(s => "  " + s))
-				.map(a => a.join("\n"))
-				.join(",\n") + "\n}",
-			reduce: () => {
-				if (components.length == 1) {
-					if (components[0].reduce) {
-						return components[0].reduce();
-					} else {
-						return components[0];
-					}
-				} else {
-					return self;
+			variable: function(name) {
+				return {
+					// add support for multiple arguments in one variable
+					evaluate: () => variables[name],
+					toString: () => `var '${name}'`,
 				}
 			},
-		};
-		return self;
-	}
 
-	function astValueString(str) {
-		return {
-			evaluate: () => str,
-			toString: () => "'" + str + "'",
-		};
-	}
-
-	function astValueVar(name) {
-		return {
-			// add support for multiple arguments in one variable
-			evaluate: () => variables[name],
-			toString: () => `var '${name}'`,
-		}
-	}
-
-	function astValueCommandSubstitution(ast) {
-		return {
-			evaluate: () => {
-				// TODO
+			commandSubstitution: function(ast) {
+				return {
+					evaluate: () => {
+						// TODO
+					},
+					toString: () => "not implemented",
+				};
 			},
-			toString: () => "not implemented",
-		};
-	}
 
-	function astValueProcessSubstitution(ast) {
-		return {
-			evaluate: () => {
-				// TODO
+			processSubstitution: function(ast) {
+				return {
+					evaluate: () => {
+						// TODO
+					},
+					toString: () => "not implemented",
+				};
 			},
-			toString: () => "not implemented",
-		};
+		},
 	}
 
 	function panic(line, message) {
@@ -172,7 +175,7 @@
 	function doubleQuoteToAst(quoteContent, line) {
 		const length = quoteContent.length;
 
-		let astRoot = astValueCompound();
+		let astRoot = ast.value.compound();
 
 		let buffer = "";
 
@@ -189,7 +192,7 @@
 			switch(state) {
 				case QS_INIT:
 						if (c == '$') {
-							astRoot.add(astValueString(buffer));
+							astRoot.add(ast.value.string(buffer));
 							buffer = "";
 							if (i < length - 1 && quoteContent[i + 1] == '(') {
 								state = QS_SUBSTITUTION;
@@ -203,7 +206,7 @@
 					break;
 				case QS_VARIABLE:
 					if (!("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".includes(c))) {
-						astRoot.add(astValueVar(buffer));
+						astRoot.add(ast.value.variable(buffer));
 						buffer = "";
 						state = QS_INIT;
 						i--;
@@ -223,10 +226,10 @@
 		if (buffer) {
 			switch(state) {
 				case QS_INIT:
-					astRoot.add(astValueString(buffer));
+					astRoot.add(ast.value.string(buffer));
 					break;
 				case QS_VARIABLE:
-					astRoot.add(astValueVar(buffer));
+					astRoot.add(ast.value.variable(buffer));
 					break;
 				case QS_SUBSTITUTION:
 					throw "not implemented";
@@ -248,7 +251,7 @@
 		const PS_COMMAND  = 1;
 		const PS_ASSIGN   = 2;
 
-		let astRoot = astSequence();
+		let astRoot = ast.sequence();
 		let current = null;
 		let value = null;
 
@@ -265,7 +268,7 @@
 					} else if (c == '#') {
 						state = PS_COMMENT;
 					} else {
-						current = astCommand();
+						current = ast.command();
 						buffer = c;
 						state = PS_COMMAND;
 					}
@@ -281,9 +284,9 @@
 						if (value) {
 							if (buffer) {
 								if (buffer[0] == '$') {
-									value.add(astValueVar(buffer.substring(1)));
+									value.add(ast.value.variable(buffer.substring(1)));
 								} else {
-									value.add(astValueString(buffer.replaceAll('\\$', '$')));
+									value.add(ast.value.string(buffer.replaceAll('\\$', '$')));
 								}
 								buffer = "";
 							}
@@ -291,9 +294,9 @@
 							value = null;
 						} else if (buffer) {
 							if (buffer[0] == '$') {
-								current.add(astValueVar(buffer.substring(1)));
+								current.add(ast.value.variable(buffer.substring(1)));
 							} else {
-								current.add(astValueString(buffer.replaceAll('\\$', '$')));
+								current.add(ast.value.string(buffer.replaceAll('\\$', '$')));
 							}
 							buffer = "";
 						}
@@ -304,9 +307,9 @@
 						if (value) {
 							if (buffer) {
 								if (buffer[0] == '$') {
-									value.add(astValueVar(buffer.substring(1)));
+									value.add(ast.value.variable(buffer.substring(1)));
 								} else {
-									value.add(astValueString(buffer.replaceAll('\\$', '$')));
+									value.add(ast.value.string(buffer.replaceAll('\\$', '$')));
 								}
 								buffer = "";
 							}
@@ -314,26 +317,26 @@
 							value = null;
 						} else if (buffer) {
 							if (buffer[0] == '$') {
-								current.add(astValueVar(buffer.substring(1)));
+								current.add(ast.value.variable(buffer.substring(1)));
 							} else {
-								current.add(astValueString(buffer.replaceAll('\\$', '$')));
+								current.add(ast.value.string(buffer.replaceAll('\\$', '$')));
 							}
 							buffer = "";
 						}
 					} else if (c == '"') {
 						if (!value) {
-							value = astValueCompound();
+							value = ast.value.compound();
 						}
 						if (buffer) {
-							value.add(astValueString(buffer));
+							value.add(ast.value.string(buffer));
 							buffer = "";
 						}
 
 						const end = findSymbolInScope(content, line, '"', i + 1, length);
-						const [ast, _line] = doubleQuoteToAst(content.substring(i + 1, end), line);
+						const [_ast, _line] = doubleQuoteToAst(content.substring(i + 1, end), line);
 						line = _line;
 
-						value.add(ast);
+						value.add(_ast);
 
 						i = end;
 					} else if (c == "'") {
@@ -345,7 +348,7 @@
 						}
 						i = end;
 					} else if (c == '=' && current.size() == 0) {
-						current = astAssignment(buffer);
+						current = ast.assignment(buffer);
 						state = PS_ASSIGN;
 						buffer = "";
 					} else {
@@ -358,21 +361,21 @@
 						if (value) {
 							if (buffer) {
 								if (buffer[0] == "$") {
-									value.add(astValueVar(buffer.substring(1)));
+									value.add(ast.value.variable(buffer.substring(1)));
 								} else {
-									value.add(astValueString(buffer));
+									value.add(ast.value.string(buffer));
 								}
 							}
 							current.setValue(value.reduce());
 							value = null;
 						} else if (buffer) {
 							if (buffer[0] == "$") {
-								current.setValue(astValueVar(buffer.substring(1)));
+								current.setValue(ast.value.variable(buffer.substring(1)));
 							} else {
-								current.setValue(astValueString(buffer));
+								current.setValue(ast.value.string(buffer));
 							}
 						} else {
-							current.setValue(astValueString(""));
+							current.setValue(ast.value.string(""));
 						}
 						buffer = "";
 						astRoot.add(current);
@@ -380,18 +383,18 @@
 						state = PS_INIT;
 					} else if (c == '"') {
 						if (!value) {
-							value = astValueCompound();
+							value = ast.value.compound();
 						}
 						if (buffer) {
-							value.add(astValueString(buffer));
+							value.add(ast.value.string(buffer));
 							buffer = "";
 						}
 
 						const end = findSymbolInScope(content, line, '"', i + 1, length);
-						const [ast, _line] = doubleQuoteToAst(content.substring(i + 1, end), line);
+						const [_ast, _line] = doubleQuoteToAst(content.substring(i + 1, end), line);
 						line = _line;
 
-						value.add(ast);
+						value.add(_ast);
 
 						i = end;
 					} else if (c == "'") {
